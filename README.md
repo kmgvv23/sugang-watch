@@ -42,6 +42,26 @@
 - `SUBJ_NO` / `SUBJ_NM_QUERY` — 다른 과목 감시 시 함께 수정
 - `SYEAR` / `TERM_GCD` — 학기 바뀌면 수정 (`0010`=1학기, `0020`=2학기)
 
+## 맥이 꺼져 있어도 감시 (GitHub Actions)
+`kmgvv23/sugang-watch` (private) 에 올려두고 `.github/workflows/watch.yml` 크론이
+**5분마다** `check_once.py` 를 실행한다. 텔레그램 토큰/chat_id 는 리포지토리 시크릿
+(`TG_TOKEN`, `TG_CHAT_ID`).
+
+- **크론 간격은 5분이 GitHub 최소값**이고, 부하가 크면 더 늦게 실행될 수 있다
+  (실측 10~20분 지연도 발생). 로컬 30초 감시보다 느리다
+- 그래서 **둘 다 켜두는 걸 권한다**: 맥이 켜져 있을 때는 `watch.py`(30초),
+  꺼져 있을 때는 Actions(5분)가 받는다. 같은 텔레그램으로 오므로 자리가 났을 때
+  중복 알림이 올 수 있다 (해로울 건 없다)
+- 반복 알림 방지 상태는 `state.json` 에 커밋되어 유지된다
+- 수동 실행: `gh workflow run watch.yml` / 로그: `gh run list --workflow=watch.yml`
+- 끄려면: `gh workflow disable watch.yml`
+
+## 알림에 들어가지 않는 것
+- **주전공/부전공 등 트랙별 배분 인원**: 수강편람 API에 해당 필드가 없다.
+  응답에 있는 인원 정보는 `ALLOC_RCNT`("현재인원/정원") 합계뿐이며,
+  `selectAtlectManualPrecaution` 제한사항도 001~003 모두 "없음"으로 온다.
+  그 배분은 수강신청 시스템 내부에서만 보이는 것으로 보인다
+
 ## 참고
 - 알림 채널 조정은 `notify.py`
 - 사용하지 않게 된 키체인 항목: `pnu-sugang-id`, `pnu-sugang-pw`
