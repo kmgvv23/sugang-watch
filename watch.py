@@ -13,6 +13,7 @@ from datetime import datetime
 
 from playwright.sync_api import sync_playwright
 
+import change_section
 import config
 import notify
 import poll
@@ -28,6 +29,69 @@ def main() -> int:
 
     had: dict[str, bool] = {}
     fails = 0
+    tries: dict[str, int] = {}       # 분반 -> 변경 시도 횟수
+    last_try: dict[str, float] = {}  # 분반 -> 마지막 시도 시각
+    held = config.CURRENT_CLASS_HINT # 현재 보유 분반 (변경 성공 시 갱신)
+
+
+    def rank(cls: str) -> int:
+        """선호 순위. 목록에 없으면 최하위."""
+        pref = config.PREFERENCE
+        return pref.index(cls) if cls in pref else len(pref) + 1
+
+    def try_change(cands: list[str]) -> None:
+        """선호 순위가 현재 보유 분반보다 높은 후보에 대해 분반변경을 시도한다."""
+        nonlocal held
+        better = sorted((c for c in cands if rank(c) < rank(held)), key=rank)
+        if not better:
+            log(f"자리는 났지만 현재 {held}분반보다 선호 순위가 높지 않음 → 변경 안 함")
+            return
+        now = time.time()
+        for cls in better:
+            if tries.get(cls, 0) >= config.CHANGE_MAX_TRIES:
+                continue
+            if now - last_try.get(cls, 0) < config.CHANGE_COOLDOWN_SEC:
+                continue
+            tries[cls] = tries.get(cls, 0) + 1
+            last_try[cls] = now
+            log(f"분반변경 시도 {held} -> {cls} ({tries[cls]}회차)")
+            try:
+                ok, msg = change_section.run(cls)
+            except change_section.Blocked as e:
+                notify.send(
+                    "⛔ 자동 변경 중단 — 직접 처리 필요",
+                    f"{e}\n\n자동 등록 방지는 사람이 처리해야 합니다.\n"
+                    f"지금 바로 접속해서 {cls}분반으로 변경하세요.\n"
+                    "https://sugang.pusan.ac.kr/",
+                    urgent=True,
+                )
+                log(f"[중단] {e}")
+                return
+            except Exception as e:
+                notify.send(
+                    "⚠️ 자동 변경 오류 — 직접 신청 권함",
+                    f"{held} -> {cls} 시도 중 오류: {e}\n\nhttps://sugang.pusan.ac.kr/",
+                    urgent=True,
+                )
+                log(f"[변경 오류] {e}")
+                continue
+
+            if ok:
+                held = cls
+                notify.send(
+                    f"✅ {cls}분반으로 변경 완료",
+                    f"{config.SUBJ_NO} 재무관리\n{msg}\n\n시스템에서 한 번 확인해 주세요.",
+                    urgent=True,
+                )
+                log(f"*** 변경 성공: {msg}")
+                return
+            log(f"변경 실패: {msg}")
+            notify.send(
+                f"❌ {cls}분반 자동 변경 실패",
+                f"{msg}\n\n자리가 먼저 채워졌을 수 있습니다. "
+                f"직접 확인해보세요.\nhttps://sugang.pusan.ac.kr/",
+                urgent=True,
+            )
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -72,6 +136,10 @@ def main() -> int:
                     first = False
 
                 if opened:
+                    mine_cls = [o["cls"] for o in opened if o["mine"]]
+                    if mine_cls and config.AUTO_CHANGE:
+                        try_change(mine_cls)
+
                     ok = True
                     for title, body, urgent in poll.messages(opened, snap["nm"]):
                         used = notify.send(title, body, urgent=urgent)
