@@ -42,6 +42,12 @@
 - `SUBJ_NO` / `SUBJ_NM_QUERY` — 다른 과목 감시 시 함께 수정
 - `SYEAR` / `TERM_GCD` — 학기 바뀌면 수정 (`0010`=1학기, `0020`=2학기)
 
+## GitHub Actions 는 알림 전용
+Actions 크론(`check_once.py`)은 **알림만** 보낸다. 자동 분반변경은 하지 않는다.
+학번/비밀번호를 GitHub 시크릿에 올려야 하는데, 대학 계정을 외부 서비스에
+보관하는 건 텔레그램 봇 토큰과는 위험도가 다르므로 넣지 않았다.
+→ **자동 변경은 맥에서 `watch.py` 가 돌고 있을 때만 동작한다.**
+
 ## 맥이 꺼져 있어도 감시 (GitHub Actions)
 `kmgvv23/sugang-watch` (private) 에 올려두고 `.github/workflows/watch.yml` 크론이
 **5분마다** `check_once.py` 를 실행한다. 텔레그램 토큰/chat_id 는 리포지토리 시크릿
@@ -92,7 +98,11 @@ UI 상으로는 신청내역의 재무관리 행에서 `input[id^=CLS_CHG_CLASS_
   (`LayerPopup.captcha` 는 공용 레이아웃에 정의만 되어 있고 수강정정 페이지에는
   호출 지점이 없다. 다만 서버가 조건부로 띄울 수 있으므로 매번 확인한다)
 - 변경 후 신청내역을 다시 읽어 실제 반영을 확인한다
+- 시작 시 수강신청에 로그인해 **실제 보유 분반을 읽고 로그인 가능 여부를 미리 확인**한다
+  (자리가 난 순간에 로그인 문제를 발견하지 않도록)
 - `PREFERENCE` 순위가 현재 보유 분반보다 높은 분반에만 시도
+- `STOP_AFTER_SUCCESS = True` — 목표 분반 하나를 잡으면 감시를 종료한다
+  (잡은 뒤에 또 다른 분반으로 바꾸려 들지 않는다)
 - 같은 분반 최대 `CHANGE_MAX_TRIES` 회, 최소 `CHANGE_COOLDOWN_SEC` 간격
 - 비밀번호는 키체인 → 브라우저 입력란으로만 흐른다
 - `AUTO_CHANGE = False` 로 두면 알림만 보낸다

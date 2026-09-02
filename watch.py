@@ -33,19 +33,33 @@ def main() -> int:
     last_try: dict[str, float] = {}  # 분반 -> 마지막 시도 시각
     held = config.CURRENT_CLASS_HINT # 현재 보유 분반 (변경 성공 시 갱신)
 
+    if config.AUTO_CHANGE:
+        # 시작 시 실제 보유 분반을 읽어 힌트를 교정하고, 로그인이 되는지 미리 확인한다.
+        try:
+            actual = change_section.read_held()
+            if actual:
+                held = actual
+                log(f"수강신청 로그인 확인 · 현재 보유 분반 {held}")
+            else:
+                log(f"[경고] 신청내역에 {config.SUBJ_NO} 가 없습니다 — 분반변경 불가, 알림만 동작")
+        except change_section.Blocked as e:
+            log(f"[경고] {e} — 자동 변경 불가, 알림만 동작")
+        except Exception as e:
+            log(f"[경고] 수강신청 로그인 확인 실패: {e} — 알림은 계속 동작")
+
 
     def rank(cls: str) -> int:
         """선호 순위. 목록에 없으면 최하위."""
         pref = config.PREFERENCE
         return pref.index(cls) if cls in pref else len(pref) + 1
 
-    def try_change(cands: list[str]) -> None:
-        """선호 순위가 현재 보유 분반보다 높은 후보에 대해 분반변경을 시도한다."""
+    def try_change(cands: list[str]) -> bool:
+        """분반변경을 시도한다. 목표 분반을 확보하면 True."""
         nonlocal held
         better = sorted((c for c in cands if rank(c) < rank(held)), key=rank)
         if not better:
             log(f"자리는 났지만 현재 {held}분반보다 선호 순위가 높지 않음 → 변경 안 함")
-            return
+            return False
         now = time.time()
         for cls in better:
             if tries.get(cls, 0) >= config.CHANGE_MAX_TRIES:
@@ -66,7 +80,7 @@ def main() -> int:
                     urgent=True,
                 )
                 log(f"[중단] {e}")
-                return
+                return False
             except Exception as e:
                 notify.send(
                     "⚠️ 자동 변경 오류 — 직접 신청 권함",
@@ -84,7 +98,7 @@ def main() -> int:
                     urgent=True,
                 )
                 log(f"*** 변경 성공: {msg}")
-                return
+                return True
             log(f"변경 실패: {msg}")
             notify.send(
                 f"❌ {cls}분반 자동 변경 실패",
@@ -92,6 +106,7 @@ def main() -> int:
                 f"직접 확인해보세요.\nhttps://sugang.pusan.ac.kr/",
                 urgent=True,
             )
+        return False
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -138,7 +153,13 @@ def main() -> int:
                 if opened:
                     mine_cls = [o["cls"] for o in opened if o["mine"]]
                     if mine_cls and config.AUTO_CHANGE:
-                        try_change(mine_cls)
+                        if try_change(mine_cls) and config.STOP_AFTER_SUCCESS:
+                            notify.send(
+                                "🎉 감시 종료",
+                                f"{held}분반 확보 완료. 더 이상 변경을 시도하지 않습니다.",
+                            )
+                            log(f"{held}분반 확보 — 감시 종료")
+                            return 0
 
                     ok = True
                     for title, body, urgent in poll.messages(opened, snap["nm"]):

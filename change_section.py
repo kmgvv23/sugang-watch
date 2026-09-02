@@ -125,6 +125,19 @@ def change_to(page, target: str, dry_run: bool = False) -> tuple[bool, str]:
     return False, f"변경 실패 (현재 {now}분반 유지). {msg}".strip()
 
 
+def read_held() -> str | None:
+    """현재 보유 중인 config.SUBJ_NO 의 분반을 읽는다. 로그인 검증도 겸한다."""
+    with sync_playwright() as p:
+        b = p.chromium.launch(headless=True)
+        page = b.new_context(locale="ko-KR").new_page()
+        try:
+            login(page)
+            mine = [r for r in current_rows(page) if r["subjNo"] == config.SUBJ_NO]
+            return mine[0]["classNo"] if mine else None
+        finally:
+            b.close()
+
+
 def run(target: str, dry_run: bool = False) -> tuple[bool, str]:
     with sync_playwright() as p:
         b = p.chromium.launch(headless=True)
