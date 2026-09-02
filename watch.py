@@ -7,9 +7,10 @@
 요청이 RSA 암호화 + CSRF 토큰을 쓰므로 헤드리스 크롬에 페이지를 띄워두고
 페이지 자신의 ajax 함수를 재사용한다.
 """
+import socket
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from playwright.sync_api import sync_playwright
 
@@ -21,6 +22,32 @@ import poll
 
 def log(msg: str) -> None:
     print(f"{datetime.now():%m-%d %H:%M:%S}  {msg}", flush=True)
+
+
+NET_ERRS = (
+    "ERR_INTERNET_DISCONNECTED", "ERR_NAME_NOT_RESOLVED",
+    "ERR_CONNECTION_REFUSED", "ERR_CONNECTION_RESET",
+    "ERR_CONNECTION_TIMED_OUT", "ERR_NETWORK_CHANGED",
+    "ERR_ADDRESS_UNREACHABLE", "ERR_PROXY_CONNECTION_FAILED",
+)
+
+
+def is_net_error(e: Exception) -> bool:
+    msg = str(e)
+    return any(k in msg for k in NET_ERRS)
+
+
+def net_up(host: str = "onestop.pusan.ac.kr", port: int = 443) -> bool:
+    """가벼운 연결 확인. 브라우저 페이지 적재보다 훨씬 싸다."""
+    try:
+        with socket.create_connection((host, port), timeout=5):
+            return True
+    except Exception:
+        return False
+
+
+def human_gap(sec: float) -> str:
+    return str(timedelta(seconds=int(sec)))
 
 
 def main() -> int:
@@ -124,6 +151,8 @@ def main() -> int:
             f"트랙 {'/'.join(tracks)} · {config.POLL_SEC}초 주기")
 
         first = True
+        last_ok = time.time()       # 마지막으로 조회가 성공한 시각
+        last_beat = time.time()
         while True:
             try:
                 if time.time() - loaded_at > config.RELOAD_EVERY:
@@ -139,7 +168,30 @@ def main() -> int:
                     continue
                 fails = 0
 
+                now = time.time()
+                gap = now - last_ok
+                if gap > config.OUTAGE_ALERT_SEC:
+                    notify.send(
+                        "⚠️ 감시 공백 발생 후 재개",
+                        f"{human_gap(gap)} 동안 조회하지 못했습니다.\n"
+                        f"({datetime.fromtimestamp(last_ok):%m-%d %H:%M} ~ "
+                        f"{datetime.fromtimestamp(now):%H:%M})\n"
+                        "그 사이에 자리가 났다 사라졌다면 놓쳤을 수 있습니다.\n"
+                        "지금은 정상 작동 중입니다.",
+                    )
+                    log(f"[공백 보고] {human_gap(gap)} 미조회 후 재개")
+                last_ok = now
+
                 opened, had, summary = poll.evaluate(snap, had)
+
+                if config.HEARTBEAT_SEC and now - last_beat >= config.HEARTBEAT_SEC:
+                    notify.send(
+                        "💚 정상 작동 중",
+                        f"{config.SUBJ_NO} {'/'.join(config.WATCH_CLASSES)}분반 감시 중\n"
+                        f"현재 보유 {held}분반\n{summary}",
+                    )
+                    last_beat = now
+                    log("하트비트 발송")
 
                 if first:
                     notify.send(
@@ -183,6 +235,27 @@ def main() -> int:
             except Exception as e:
                 fails += 1
                 log(f"[오류 {fails}] {e}")
+
+                if is_net_error(e) or not net_up():
+                    # 네트워크가 죽은 동안 페이지 적재를 반복해도 무의미하다.
+                    # 연결이 돌아올 때까지 값싼 확인만 반복한다.
+                    log("네트워크 끊김 — 복구 대기")
+                    waited, delay = 0, 10
+                    while not net_up():
+                        time.sleep(delay)
+                        waited += delay
+                        delay = min(delay * 2, 60)
+                        if waited % 300 < delay:
+                            log(f"네트워크 복구 대기 중... {human_gap(waited)}")
+                    log(f"네트워크 복구됨 ({human_gap(waited)}) — 페이지 재적재")
+                    try:
+                        load()
+                        loaded_at = time.time()
+                        fails = 0
+                    except Exception as e2:
+                        log(f"[재적재 실패] {e2}")
+                    continue
+
                 if fails >= 3:
                     try:
                         load()
