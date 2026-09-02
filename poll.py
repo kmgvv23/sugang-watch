@@ -111,9 +111,10 @@ def wanted(track: str) -> bool:
     return True if not t else track in t
 
 
-def evaluate(snap: dict, had: dict) -> tuple[list[str], dict, str]:
-    """(새로 열린 자리 문구들, 갱신된 had, 한줄요약)
+def evaluate(snap: dict, had: dict) -> tuple[list[dict], dict, str]:
+    """(새로 열린 자리 목록, 갱신된 had, 한줄요약)
 
+    각 항목: {'cls','track','free','cur','cap','key','mine'}
     had 키는 '분반:트랙'. 자리가 없어지면 상태를 지워 다음에 다시 알리도록 한다.
     """
     opened, summary = [], []
@@ -131,7 +132,11 @@ def evaluate(snap: dict, had: dict) -> tuple[list[str], dict, str]:
                 continue
             if free > 0:
                 if not had.get(key):
-                    opened.append(f"{cls}분반 {track} {free}자리 ({tcur}/{tcap})")
+                    opened.append({
+                        "cls": cls, "track": track, "free": free,
+                        "cur": tcur, "cap": tcap, "key": key,
+                        "mine": track == getattr(config, "MY_TRACK", None),
+                    })
             else:
                 had[key] = False
         if sec.get("detailErr"):
@@ -140,7 +145,38 @@ def evaluate(snap: dict, had: dict) -> tuple[list[str], dict, str]:
     return opened, had, "  ".join(summary)
 
 
-def key_of(opened_line: str) -> str:
-    """'001분반 주전공 1자리 (43/44)' -> '001:주전공'"""
-    cls, rest = opened_line.split("분반 ", 1)
-    return f"{cls}:{rest.split(' ')[0]}"
+def messages(opened: list[dict], nm: str) -> list[tuple[str, str, bool]]:
+    """열린 자리들을 '내 트랙'과 '그 외'로 갈라 (제목, 본문, 긴급) 목록으로 만든다.
+
+    내 트랙(부전공)은 바로 신청 가능하므로 신청에 필요한 값을 그대로 담고,
+    그 외 트랙은 학과에 전화해 변경을 요청해야 하므로 연락처를 담는다.
+    """
+    mine = [o for o in opened if o["mine"]]
+    other = [o for o in opened if not o["mine"]]
+    out = []
+
+    if mine:
+        lines = [f"· {o['cls']}분반 {o['track']} {o['free']}자리 ({o['cur']}/{o['cap']})"
+                 for o in mine]
+        body = (
+            "\n".join(lines)
+            + "\n\n지금 바로 신청하세요 (빠른 수강신청):"
+            + f"\n  교과목번호  {config.SUBJ_NO}"
+            + f"\n  분반        {', '.join(o['cls'] for o in mine)}"
+            + "\n\nhttps://sugang.pusan.ac.kr/"
+        )
+        out.append((f"🔴 {config.MY_TRACK} 자리 · {nm}", body, True))
+
+    if other:
+        lines = [f"· {o['cls']}분반 {o['track']} {o['free']}자리 ({o['cur']}/{o['cap']})"
+                 for o in other]
+        phone = getattr(config, "DEPT_PHONE", "")
+        body = (
+            "\n".join(lines)
+            + f"\n\n{config.MY_TRACK} 칸이 아니라 바로 신청은 안 됩니다."
+            + (f"\n학과 전화: {phone}" if phone else "")
+            + "\n(트랙 변경 요청 필요)"
+        )
+        out.append((f"🟡 다른 트랙 자리 · {nm}", body, False))
+
+    return out

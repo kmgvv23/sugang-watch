@@ -72,18 +72,20 @@ def main() -> int:
                     first = False
 
                 if opened:
-                    used = notify.send(
-                        f"🚨 자리 났습니다 · {snap['nm']}",
-                        "\n".join("· " + o for o in opened)
-                        + "\n\n→ sugang.pusan.ac.kr 바로 신청",
-                        urgent=True,
-                    )
-                    if used == ["텔레그램"]:
+                    ok = True
+                    for title, body, urgent in poll.messages(opened, snap["nm"]):
+                        used = notify.send(title, body, urgent=urgent)
+                        if used != ["텔레그램"]:
+                            ok = False
+                            log(f"[알림 실패] {used} — {title}")
+                    desc = "; ".join(
+                        f"{o['cls']}/{o['track']} {o['free']}자리" for o in opened)
+                    if ok:
                         for o in opened:
-                            had[poll.key_of(o)] = True
-                        log(f"*** 알림 발송: {'; '.join(opened)}")
+                            had[o["key"]] = True
+                        log(f"*** 알림 발송: {desc}")
                     else:
-                        log(f"[알림 실패] {used} — 다음 회차 재시도: {'; '.join(opened)}")
+                        log(f"[알림 일부 실패] 다음 회차 재시도: {desc}")
                 else:
                     log(f"여석 없음  {summary}")
 
