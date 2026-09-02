@@ -1,0 +1,6 @@
+.env
+.state.json
+discover_out/
+__pycache__/
+watch.log
+setup_chat.log

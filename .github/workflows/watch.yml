@@ -1,0 +1,51 @@
+name: 여석 감시
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"   # 5분마다 (GitHub 크론 최소 간격)
+  workflow_dispatch:        # 수동 실행
+
+concurrency:
+  group: seat-watch
+  cancel-in-progress: false
+
+permissions:
+  contents: write           # state.json 커밋용
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Playwright 설치
+        run: |
+          pip install --quiet playwright
+          python -m playwright install --with-deps chromium
+
+      - name: 여석 확인
+        id: check
+        env:
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: |
+          set +e
+          python check_once.py
+          code=$?
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          # 10 = 상태 변경(정상), 0 = 변경 없음(정상), 그 외 = 실패
+          [ "$code" = "10" ] || [ "$code" = "0" ]
+
+      - name: 상태 저장
+        if: steps.check.outputs.code == '10'
+        run: |
+          git config user.name "seat-watch"
+          git config user.email "seat-watch@users.noreply.github.com"
+          git add state.json
+          git diff --staged --quiet || git commit -m "상태 갱신"
+          git push
