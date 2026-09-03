@@ -35,7 +35,6 @@ jobs:
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RUN_SEC: "20400"      # 5시간 40분
           CI_POLL_SEC: "60"
         run: python watch_ci.py

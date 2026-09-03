@@ -21,7 +21,7 @@ import poll
 
 RUN_SEC = int(os.environ.get("RUN_SEC", 5 * 3600 + 40 * 60))   # 약 5.7시간
 POLL_SEC = int(os.environ.get("CI_POLL_SEC", 60))
-TOKEN = os.environ.get("GITHUB_TOKEN") or None
+TOKEN = None   # 공개 gist 는 비인증으로 읽는다 (heartbeat.read 주석 참고)
 
 
 def log(msg: str) -> None:

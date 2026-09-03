@@ -38,18 +38,30 @@ def beat(force: bool = False) -> bool:
     return False
 
 
+OWNER = "kmgvv23"
+RAW = f"https://gist.githubusercontent.com/{OWNER}/{GIST_ID}/raw/{FILENAME}"
+
+
 def read(token: str | None = None) -> int | None:
-    """마지막 생존 신호 시각. 읽기 실패면 None."""
-    req = urllib.request.Request(f"https://api.github.com/gists/{GIST_ID}")
-    req.add_header("Accept", "application/vnd.github+json")
-    if token:
-        req.add_header("Authorization", f"Bearer {token}")
-    try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            d = json.load(resp)
-        return int(d["files"][FILENAME]["content"].strip())
-    except Exception:
-        return None
+    """마지막 생존 신호 시각. 읽기 실패면 None.
+
+    공개 gist 이므로 인증하지 않는다. Actions 의 GITHUB_TOKEN 은 설치 토큰이라
+    gist 스코프가 없어 오히려 401/404 가 난다 (그래서 token 인자는 무시한다).
+    raw URL 은 60초 CDN 캐시가 있으므로 캐시 버스터를 붙여 최신값을 받는다.
+    """
+    cb = int(time.time())
+    for url, parse in (
+        (f"{RAW}?cb={cb}", lambda b: b.decode().strip()),
+        (f"https://api.github.com/gists/{GIST_ID}",
+         lambda b: json.loads(b)["files"][FILENAME]["content"].strip()),
+    ):
+        try:
+            req = urllib.request.Request(url, headers={"Cache-Control": "no-cache"})
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                return int(parse(resp.read()))
+        except Exception:
+            continue
+    return None
 
 
 def local_alive(token: str | None = None) -> tuple[bool, float | None]:
