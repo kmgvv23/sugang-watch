@@ -24,6 +24,7 @@ import config
 import heartbeat
 import notify
 import poll
+import standby
 
 
 def log(msg: str) -> None:
@@ -166,7 +167,19 @@ def main() -> int:
 
     with sync_playwright() as pw:
         sess = Session(pw)
-        sess.open()
+        # 시작 적재도 실패할 수 있다 (학교 서버 지연). 여기서 죽으면 감시가 아예 안 된다.
+        for attempt in range(4):
+            try:
+                sess.open()
+                break
+            except Exception as e:
+                log(f"[초기 적재 실패 {attempt + 1}/4] {type(e).__name__}: {str(e)[:120]}")
+                if not net_up():
+                    wait_for_net()
+                else:
+                    time.sleep(min(15 * (attempt + 1), 60))
+        else:
+            log("[경고] 초기 적재 4회 실패 — 루프에서 계속 재시도한다")
 
         tracks = getattr(config, "WATCH_TRACKS", None) or ["모든 트랙"]
         log(f"감시 시작: {config.SUBJ_NO} 분반 {'/'.join(config.WATCH_CLASSES)} · "
@@ -231,6 +244,12 @@ def main() -> int:
                 # 이 값이 낡으면 GitHub Actions 대기조가 감시를 인수한다.
                 if not heartbeat.beat():
                     log("[경고] 생존 신호 갱신 실패 — Actions 가 인수할 수 있음")
+
+                # 로컬이 살아있는 동안 대기조를 항상 띄워둔다.
+                # 그래야 로컬이 죽는 순간 이미 대기조가 감시 중이다.
+                act = standby.ensure()
+                if act:
+                    log(act)
 
                 opened, had, summary = poll.evaluate(snap, had)
 

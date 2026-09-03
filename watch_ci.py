@@ -41,23 +41,39 @@ def main() -> int:
     with sync_playwright() as pw:
         browser = page = None
 
-        def rebuild():
-            nonlocal browser, page
-            try:
-                if browser:
-                    browser.close()
-            except Exception:
-                pass
-            browser = pw.chromium.launch(headless=True)
-            page = browser.new_context(locale="ko-KR").new_page()
-            page.goto(config.PAGE_URL, wait_until="domcontentloaded", timeout=90_000)
-            page.wait_for_function(poll.READY_JS, timeout=90_000)
+        def rebuild() -> bool:
+            """브라우저를 새로 띄운다. 절대 예외를 올리지 않는다.
 
-        rebuild()
+            학교 서버가 느려 첫 적재가 실패하는 일이 흔하므로, 여기서 죽으면
+            대기조 전체가 종료돼 감시 공백이 된다. 그래서 재시도하고 성공 여부만 돌려준다.
+            """
+            nonlocal browser, page
+            for attempt in range(4):
+                try:
+                    if browser:
+                        browser.close()
+                except Exception:
+                    pass
+                try:
+                    browser = pw.chromium.launch(headless=True)
+                    page = browser.new_context(locale="ko-KR").new_page()
+                    page.goto(config.PAGE_URL, wait_until="domcontentloaded",
+                              timeout=120_000)
+                    page.wait_for_function(poll.READY_JS, timeout=120_000)
+                    return True
+                except Exception as e:
+                    log(f"[적재 실패 {attempt + 1}/4] {type(e).__name__}: {str(e)[:120]}")
+                    time.sleep(min(15 * (attempt + 1), 60))
+            return False
+
+        if not rebuild():
+            log("[경고] 초기 적재 실패 — 루프에서 계속 재시도한다")
 
         while time.time() < deadline:
             try:
                 alive, age = heartbeat.local_alive(TOKEN)
+                if page is None:
+                    raise RuntimeError("페이지 없음")
                 snap = poll.snapshot(page)
                 if not snap.get("ok") or not snap["sections"]:
                     raise RuntimeError(snap.get("err") or "빈 결과")
@@ -94,12 +110,11 @@ def main() -> int:
                     log(f"인수 중 · 여석 없음  {summary}")
 
             except Exception as e:
-                log(f"[오류] {e}")
-                try:
-                    rebuild()
-                    log("브라우저 재생성")
-                except Exception as e2:
-                    log(f"[재생성 실패] {e2}")
+                log(f"[오류] {type(e).__name__}: {str(e)[:150]}")
+                if rebuild():
+                    log("브라우저 재생성 완료")
+                else:
+                    log("[경고] 재생성 실패 — 다음 회차에 재시도")
                     time.sleep(30)
 
             time.sleep(POLL_SEC)
