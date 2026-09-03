@@ -145,6 +145,13 @@ def evaluate(snap: dict, had: dict) -> tuple[list[dict], dict, str]:
     return opened, had, "  ".join(summary)
 
 
+def _conflict_note(classes: list[str]) -> str:
+    """확정 과목과 시간이 겹치는 분반이면 경고 문구를 만든다."""
+    conf = getattr(config, "CONFLICT", {})
+    hits = [f"\n⚠️ {c}분반: {conf[c]}" for c in classes if c in conf]
+    return "".join(hits)
+
+
 def messages(opened: list[dict], nm: str) -> list[tuple[str, str, bool]]:
     """열린 자리들을 '내 트랙'과 '그 외'로 갈라 (제목, 본문, 긴급) 목록으로 만든다.
 
@@ -160,9 +167,10 @@ def messages(opened: list[dict], nm: str) -> list[tuple[str, str, bool]]:
                  for o in mine]
         body = (
             "\n".join(lines)
-            + "\n\n지금 바로 신청하세요 (빠른 수강신청):"
+            + "\n\n신청내역의 재무관리 행에서 분반변경:"
             + f"\n  교과목번호  {config.SUBJ_NO}"
-            + f"\n  분반        {', '.join(o['cls'] for o in mine)}"
+            + f"\n  희망 분반   {', '.join(o['cls'] for o in mine)}"
+            + _conflict_note([o["cls"] for o in mine])
             + "\n\nhttps://sugang.pusan.ac.kr/"
         )
         out.append((f"🔴 {config.MY_TRACK} 자리 · {nm}", body, True))
@@ -173,7 +181,8 @@ def messages(opened: list[dict], nm: str) -> list[tuple[str, str, bool]]:
         phone = getattr(config, "DEPT_PHONE", "")
         body = (
             "\n".join(lines)
-            + f"\n\n{config.MY_TRACK} 칸이 아니라 바로 신청은 안 됩니다."
+            + _conflict_note([o["cls"] for o in other])
+            + f"\n\n{config.MY_TRACK} 칸이 아니라 바로 변경은 안 됩니다."
             + (f"\n학과 전화: {phone}" if phone else "")
             + "\n(트랙 변경 요청 필요)"
         )
