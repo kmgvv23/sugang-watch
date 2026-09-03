@@ -1,0 +1,41 @@
+name: 대기조 감시
+
+# 로컬(맥) 감시기가 죽어 있는 동안만 알림을 보내는 대기조.
+# 한 작업이 약 5.7시간 돌고, concurrency 로 다음 실행이 대기하다가 이어받는다.
+# schedule 이 자주 건너뛰어도 대기 중인 실행이 있으므로 연속성이 유지된다.
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: standby-watch
+  cancel-in-progress: false   # 새 실행은 취소하지 않고 '대기'시킨다 (하나만 대기)
+
+permissions:
+  contents: read
+
+jobs:
+  standby:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Playwright 설치
+        run: |
+          pip install --quiet playwright
+          python -m playwright install --with-deps chromium
+
+      - name: 대기조 실행
+        env:
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_SEC: "20400"      # 5시간 40분
+          CI_POLL_SEC: "60"
+        run: python watch_ci.py
